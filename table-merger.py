@@ -2,52 +2,54 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.title("🧩 Fusionneur intelligent de fichiers Excel")
+st.set_page_config(page_title="Fusion Excel par clé", layout="wide")
+st.title("🔗 Fusion de fichiers Excel par clé commune")
 
-uploaded_files = st.file_uploader(
-    "Upload plusieurs fichiers Excel (.xlsx) contenant une clé commune",
-    type="xlsx",
-    accept_multiple_files=True
-)
+# --- Étape 1 : Upload des fichiers
+uploaded_files = st.file_uploader("📤 Upload de plusieurs fichiers Excel", type=["xlsx"], accept_multiple_files=True)
 
 if uploaded_files:
-    dfs = {}
-    st.subheader("📄 Colonnes détectées dans chaque fichier :")
-    
+    dfs = []
+    st.subheader("📄 Aperçu des fichiers")
     for file in uploaded_files:
         df = pd.read_excel(file)
-        filename = file.name
-        dfs[filename] = df
-        st.write(f"**{filename}** → Colonnes : `{list(df.columns)}`")
+        dfs.append(df)
+        st.write(f"✅ **{file.name}** ({df.shape[0]} lignes, {df.shape[1]} colonnes)")
+        st.dataframe(df.head(), use_container_width=True)
 
-    # Intersection des colonnes pour trouver les clés communes potentielles
-    common_columns = set(dfs[uploaded_files[0].name].columns)
-    for df in dfs.values():
-        common_columns.intersection_update(set(df.columns))
+    # --- Étape 2 : Choix de la clé commune
+    st.subheader("🔑 Clé commune pour fusionner")
+    all_columns = list(set(col for df in dfs for col in df.columns))
+    key_col = st.selectbox("Choisissez la clé de jointure :", options=all_columns)
 
-    if common_columns:
-        st.subheader("🔑 Sélectionne la clé commune pour la fusion")
-        merge_key = st.selectbox("Clé de fusion", sorted(common_columns))
+    # --- Étape 3 : Fusion des fichiers
+    st.subheader("🔄 Fusion des fichiers")
+    merged_df = dfs[0]
+    for df in dfs[1:]:
+        if key_col in df.columns:
+            merged_df = pd.merge(merged_df, df, on=key_col, how="outer")
+        else:
+            st.warning(f"La clé '{key_col}' est absente dans un des fichiers.")
+    
+    st.success(f"🎉 Fusion effectuée ({merged_df.shape[0]} lignes, {merged_df.shape[1]} colonnes)")
 
-        if st.button("Fusionner les fichiers"):
-            merged_df = None
-            for name, df in dfs.items():
-                if merged_df is None:
-                    merged_df = df
-                else:
-                    merged_df = pd.merge(merged_df, df, on=merge_key, how="outer", suffixes=('', f'_{name[:5]}'))
+    # --- Étape 4 : Sélection des colonnes à garder
+    st.subheader("🧹 Sélectionnez les colonnes à inclure")
+    selected_cols = st.multiselect("Colonnes à garder dans le fichier final :", merged_df.columns.tolist(), default=merged_df.columns.tolist())
+    filtered_df = merged_df[selected_cols]
 
-            st.success("🎉 Fichiers fusionnés avec succès !")
-            st.write("Aperçu du résultat :", merged_df.head())
+    st.dataframe(filtered_df, use_container_width=True)
 
-            # Option de téléchargement
-            towrite = io.BytesIO()
-            merged_df.to_excel(towrite, index=False, engine='openpyxl')
-            st.download_button(
-                label="📥 Télécharger le fichier fusionné (.xlsx)",
-                data=towrite.getvalue(),
-                file_name="fusion_result.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-    else:
-        st.warning("⚠️ Aucun nom de colonne commun détecté entre tous les fichiers. Assure-toi qu'ils ont une clé identique (ex: 'id_projet').")
+    # --- Étape 5 : Export
+    def convert_df_to_excel(df):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False)
+        return output.getvalue()
+
+    st.download_button(
+        label="📥 Télécharger le fichier Excel fusionné",
+        data=convert_df_to_excel(filtered_df),
+        file_name="fusion_resultat.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
